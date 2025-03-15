@@ -386,7 +386,7 @@ def handle_order(c: Cardinal, order: Dict, links: List[str]) -> None:
         settings = load_settings()
         if not settings.get("set_tg_private", False):
             if "t.me" in link and ("/c/" in link or "+" in link):
-                c.send_message(order['chat_id'], "❌ Данный тип ссылки не поддерживается. Канал/група должны быть публичными!")
+                c.send_message(order['chat_id'], "❌ Данный тип ссылки не поддерживается. Канал/группа должны быть публичными!")
                 return
         order['url'] = link
         link = link.replace("https://", "")
