@@ -1,47 +1,37 @@
-from pip._internal.cli.main import main
-from typing import TYPE_CHECKING, Optional, List, Dict 
+import json
+import logging
+import os
+import re
+import threading
+from datetime import datetime
+from typing import TYPE_CHECKING, Optional, List, Dict
+
+import requests
+import telebot
+from telebot import types
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from cardinal import Cardinal
 if TYPE_CHECKING:
     from cardinal import Cardinal
+
 from FunPayAPI.updater.events import *
 from FunPayAPI.types import MessageTypes
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from telebot import types
-import logging
+
 from locales.localizer import Localizer
-import requests
-import os, re
-import json
-import telebot
-from typing import Dict
-from datetime import datetime
 from tg_bot.utils import load_authorized_users
-import threading
 
-try:
-    from dotenv import load_dotenv
-    from googletrans import Translator
-except ImportError:
-    main(["install", "-U", "python-dotenv"])
-    main(["install", "-U", "googletrans==3.1.0a0"])
-    from dotenv import load_dotenv
-    from googletrans import Translator
 
-load_dotenv()
 pending_confirmations = {}
-
-translator = Translator()
-logger = logging.getLogger("FPC.handlers")
+logger = logging.getLogger("FPC.AutoSmm")
 localizer = Localizer()
 _ = localizer.translate
 
 LOGGER_PREFIX = "AutoSmm Plugin"
-NAME = "AutoSmm"
-VERSION = "0.0.12" 
+NAME = "AUTOSMM"
+VERSION = "0.0.13" 
 CREDITS = "@klaymov"
 UUID = "7aa412ab-0840-455d-9513-6f51bf83d43b"
 SETTINGS_PAGE = False
-ghk=True
 
 ORDERS_FILE = f"storage/plugins/{UUID}/orders.json"
 PAYORDERS_FILE = f"storage/plugins/{UUID}/payorders.json"
@@ -143,22 +133,6 @@ def get_api_key(type=None):
         return settings.get("api_key_2", "")
     return settings.get("api_key", "")
 
-def chekghk(id):
-    return
-
-    # global ghk
-    # url = "https://raw.githubusercontent.com/klaymov/AutoSmmPluginIds/refs/heads/main/ids.txt"
-    # try:
-    #     response = requests.get(url)
-    #     if response.status_code == 200:
-    #         content = response.text
-    #         pattern = rf'\b{id}\b'
-    #         match = re.search(pattern, content)
-    #         if match:
-    #             ghk = True
-    # except Exception as e:
-    #     logger.error(e)
-
 
 def extract_links(text: str) -> List[str]:
     """
@@ -179,9 +153,6 @@ def find_order_by_buyer(orders: List[Dict], buyer: str) -> Optional[Dict]:
 
 
 def bind_to_new_order(c: Cardinal, e: NewOrderEvent) -> None:
-    global ghk
-    if not ghk:
-        return
     try:
         _element_data = e.order
         _order_id = _element_data.id
@@ -255,9 +226,7 @@ def order_handler(c: Cardinal, e: NewOrderEvent, id_value, quan_value, buyer_uz,
 
 
 logger.info(f"$MAGENTA{LOGGER_PREFIX} успешно запущен.$RESET")
-DESCRIPTION = """Плагин добавляет возможность автонакрутки с api!
-
-ПЕРЕПРОДАЖА ПЛАГИНА СТРОГО ЗАПРЕЩЕНА!"""
+DESCRIPTION = "Плагин добавляет возможность автонакрутки с api-V2!"
 
 
 def msg_hook(c: Cardinal, e: NewMessageEvent) -> None:
@@ -336,10 +305,8 @@ def msg_hook(c: Cardinal, e: NewMessageEvent) -> None:
             else:
                 display_start_count = str(start_count)
             
-            translated_st = translator.translate(status['status'], src='en', dest='ru')
-            
             status_text = f"📈 Статус заказа: {smm_order_id}\n"
-            status_text += f"⠀∟📊 Статус: {translated_st.text}\n"
+            status_text += f"⠀∟📊 Статус: {status['status']}\n"
             status_text += f"⠀∟🔢 Было: {display_start_count}\n"
             status_text += f"⠀∟👀 Остаток выполнения: {status['remains']}"
             c.send_message(msg.chat_id, status_text)
@@ -357,10 +324,8 @@ def msg_hook(c: Cardinal, e: NewMessageEvent) -> None:
             else:
                 display_start_count = str(start_count)
             
-            translated_st = translator.translate(status['status'], src='en', dest='ru')
-            
             status_text = f"📈 Статус заказа: {smm_order_id}\n"
-            status_text += f"⠀∟📊 Статус: {translated_st.text}\n"
+            status_text += f"⠀∟📊 Статус: {status['status']}\n"
             status_text += f"⠀∟🔢 Было: {display_start_count}\n"
             status_text += f"⠀∟👀 Остаток выполнения: {status['remains']}"
             c.send_message(msg.chat_id, status_text)
@@ -461,11 +426,10 @@ def confirm_order(c: Cardinal, chat_id: int, text: str, api_url, api_key) -> Non
                             ⌛ Время выполнения: от нескольких минут до 48 часов. В редких случаях возможны задержки.
                             """)
             else:
-                translated_er = translator.translate(smm_order_id, src='en', dest='ru')
-                c.send_message(order['chat_id'], f"❌ Ошибка при создании заказа: {translated_er.text}")
+                c.send_message(order['chat_id'], f"❌ Ошибка при создании заказа: {smm_order_id}")
                 # отправка сообщения в тг
                 if settings.get("set_alert_errororder", False):
-                    send_order_error_info(c, translated_er.text, order)
+                    send_order_error_info(c, smm_order_id, order)
                 if settings.get("set_alert_smmbalance", False):
                     send_smm_balance_info(c)
                 if settings.get("set_refund_smm", False):
@@ -632,21 +596,12 @@ def send_smm_start_info(c: Cardinal) -> None:
     """
     Инфа в телеграм при старте бота
     """
-    global ghk
-    
-    if ghk:
-        text_start = (
-            f"<b><u>✅ Авто-накрутка инициализирована!</u></b>\n\n"
-            f"<b><i>ℹ️ Версия:</i></b> <code>{VERSION}</code>\n"
-            f"<b><i>⚙️ Настройки /autosmm</i></b>\n\n"
-            f"<i>ℹ️ Авто-накрутка by @klaymov</i>"
-        )
-    else:
-        bot_id = c.telegram.bot.get_me().id
-        text_start = (
-            f'<b>❌ Вы не авторизованый пользователь AutoSmm! Обратитесь к создателю плагина!</b>\n'
-            f'<b>Ваш ID:</b> <span class="tg-spoiler">{bot_id}</span>'
-        )
+    text_start = (
+        f"<b><u>✅ Авто-накрутка инициализирована!</u></b>\n\n"
+        f"<b><i>ℹ️ Версия:</i></b> <code>{VERSION}</code>\n"
+        f"<b><i>⚙️ Настройки /autosmm</i></b>\n\n"
+        f"<i>ℹ️ Авто-накрутка by @klaymov</i>"
+    )
     
     try:
         users = load_authorized_users()
@@ -877,14 +832,11 @@ def process_orders(c: Cardinal):
         cashlist.clear()
         save_cashlist(cashlist)
         
-        logger.info("Проверка статусов заказов завершена.")
+        logger.info("Проверка статусов заказов завершена. Сплю минуту..")
         time.sleep(60)
 
     
 def init_commands(cardinal: Cardinal, *args):
-    global ghk
-    bot_id = cardinal.telegram.bot.get_me().id
-    chekghk(bot_id)
     # старт сообщение
     settings = load_settings()
     if settings.get("set_start_mess", False):
@@ -954,9 +906,6 @@ def init_commands(cardinal: Cardinal, *args):
         return alerts_smm_keyboard
 
     def send_settings(m: types.Message):
-        if not ghk:
-            send_smm_start_info(cardinal)
-            return
         bot.reply_to(m, "API 1: <code>ID:</code>\nAPI 2: <code>ID2:</code>\n\n⚙️ AutoSmm:", reply_markup=settings_smm_keyboard)
 
     def edit(call: telebot.types.CallbackQuery):
